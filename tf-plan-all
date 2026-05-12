@@ -1,0 +1,105 @@
+#!/bin/zsh
+# tf-plan-all: Run terraform plan in every subdirectory that contains .tf files.
+# Logs full output for any dir that is NOT "No changes." — skips logging clean dirs.
+# Prints a status table at the end: No Changes | Has Changes | Error | Skipped
+#
+# Usage:
+#   tf-plan-all [dir]       # plan all subdirs of [dir] (default: current directory)
+#
+# Examples:
+#   tf-plan-all
+#   tf-plan-all terraform/production/imported/network
+#   tf-plan-all terraform/production/imported
+
+setopt nounset
+
+base_dir="${1:-.}"
+log_dir="${base_dir}/tf-plan-logs"
+mkdir -p "$log_dir"
+
+timestamp=$(date +%Y%m%d-%H%M%S)
+
+# status arrays: dir_name|status
+typeset -a results
+
+for dir in "$base_dir" "$base_dir"/**/*(/N); do
+  dir_name="${dir#$base_dir/}"   # relative path from base, e.g. dns/us-east-1
+  tf_files=("$dir"/*.tf(N))
+
+  # Silently ignore the log output directory (at any depth)
+  if [[ "$dir" == *"/tf-plan-logs"* ]]; then
+    continue
+  fi
+
+  # Skip dirs with no .tf files (parent/container dirs)
+  if (( ${#tf_files[@]} == 0 )); then
+    continue
+  fi
+
+  # Skip child modules — only plan root modules (those with a provider block)
+  if ! grep -rlq '^provider\s' "$dir"/*.tf 2>/dev/null; then
+    continue
+  fi
+
+  log_file="$log_dir/${timestamp}-${dir_name}.log"
+  mkdir -p "${log_file:h}"
+
+  # Run silently — capture output to log only
+  (
+    cd "$dir" || exit 1
+    terraform plan 2>&1
+  ) > "$log_file"
+  rc=$?
+
+  if [[ $rc -ne 0 ]]; then
+    echo "==> ❌ ERROR: $dir_name (exit $rc)"
+    results+=("$dir_name|ERROR")
+  elif grep -q "No changes\." "$log_file" 2>/dev/null; then
+    echo "==> ✅ NO CHANGES: $dir_name"
+    results+=("$dir_name|NO_CHANGES")
+    # Clean up log — no follow-up needed
+    rm -f "$log_file"
+  else
+    echo "==> ⚠️  HAS CHANGES: $dir_name"
+    results+=("$dir_name|HAS_CHANGES")
+    # Log retained for follow-up
+  fi
+done
+
+# ── Summary table ────────────────────────────────────────────────────────────
+echo
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║                   tf-plan-all  SUMMARY                      ║"
+echo "╠══════════════════════════════════════════════════════════════╣"
+printf "║  %-38s  %-16s ║\n" "Directory" "Status"
+echo "╠══════════════════════════════════════════════════════════════╣"
+
+n_clean=0; n_changes=0; n_errors=0; n_skip=0
+
+for entry in "${results[@]}"; do
+  name="${entry%%|*}"
+  result_status="${entry##*|}"
+  label="?? Unknown"
+  case "$result_status" in
+    NO_CHANGES)  label="✅ No Changes";  n_clean=$(( n_clean + 1 ))     ;;
+    HAS_CHANGES) label="⚠️  Has Changes"; n_changes=$(( n_changes + 1 )) ;;
+    ERROR)       label="❌ Error";        n_errors=$(( n_errors + 1 ))   ;;
+    SKIP)        label="-- Skipped";     n_skip=$(( n_skip + 1 ))       ;;
+  esac
+  printf "║  %-38s  %-16s ║\n" "$name" "$label"
+done
+
+echo "╠══════════════════════════════════════════════════════════════╣"
+printf "║  ✅ No Changes: %-3d  ⚠️  Has Changes: %-3d  ❌ Errors: %-3d  ║\n" \
+  $n_clean $n_changes $n_errors
+echo "╚══════════════════════════════════════════════════════════════╝"
+
+if [[ $n_changes -gt 0 || $n_errors -gt 0 ]]; then
+  echo
+  echo "Logs saved to: $log_dir/"
+  for f in "$log_dir"/${timestamp}-*.log(N); do
+    echo "  $f"
+  done
+fi
+
+[[ $n_errors -eq 0 ]]
