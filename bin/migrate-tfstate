@@ -1,17 +1,37 @@
 #!/usr/bin/env bash
+# =============================================================================
 # migrate-tfstate — Adds S3 backend config to a module and migrates its state.
 #
 # Usage:
-#   ./utils/migrate-tfstate terraform/production/services/eks
-#   ./utils/migrate-tfstate terraform/production/database
-#   ./utils/migrate-tfstate --dry-run terraform/production/iam
-#   ./utils/migrate-tfstate --upload terraform/production/iam
+#   migrate-tfstate terraform/production/services/eks
+#   migrate-tfstate terraform/production/database
+#   migrate-tfstate --dry-run terraform/production/iam
+#   migrate-tfstate --upload terraform/production/iam
 #
 # Prerequisites:
 #   - terraform/production/state must be applied first
 #   - Module must have a local terraform.tfstate
-
+# =============================================================================
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+K8_LIB_DIR="${K8_LIB_DIR:-$(cd "$SCRIPT_DIR/../../k8-lib" 2>/dev/null && pwd || echo "${HOME}/.local/share/k8-lib")}"
+INFRA_ROOT="${INFRA_ROOT:-$(pwd)}"
+
+# Pre-parse --config (must resolve before k8-lib sourcing)
+for _k8_arg in "$@"; do
+  case "$_k8_arg" in
+    --config=*) export K8_CONFIG="${_k8_arg#--config=}" ;;
+  esac
+done
+_k8_prev=""
+for _k8_arg in "$@"; do
+  [[ "$_k8_prev" == "--config" ]] && export K8_CONFIG="$_k8_arg"
+  _k8_prev="$_k8_arg"
+done
+unset _k8_arg _k8_prev
+
+source "$K8_LIB_DIR/bin/config.sh"
+source "$K8_LIB_DIR/bin/common.sh"
 
 BUCKET="${K8_TF_STATE_BUCKET:-}"
 REGION="${K8_AWS_REGION:-us-east-1}"
@@ -24,22 +44,22 @@ AUTO_APPROVE=false
 
 while [[ "${1:-}" == --* ]]; do
   case "$1" in
+    --config) shift 2 ;;
+    --config=*) shift ;;
     --dry-run)  DRY_RUN=true; shift ;;
     --upload)   AUTO_APPROVE=true; shift ;;
-    *) echo "Unknown flag: $1" >&2; exit 1 ;;
+    *) die "Unknown flag: $1" ;;
   esac
 done
 
-MODULE_DIR="${1:?Usage: migrate-tfstate [--dry-run] [--upload] <module-dir>}"
+MODULE_DIR="${1:?Usage: migrate-tfstate [--dry-run] [--upload] [--config <path>] <module-dir>}"
 
 if [[ ! -d "$MODULE_DIR" ]]; then
-  echo "Error: $MODULE_DIR is not a directory" >&2
-  exit 1
+  die "$MODULE_DIR is not a directory"
 fi
 
 if [[ ! -f "$MODULE_DIR/terraform.tfstate" ]]; then
-  echo "Error: No local terraform.tfstate in $MODULE_DIR" >&2
-  exit 1
+  die "No local terraform.tfstate in $MODULE_DIR"
 fi
 
 # Derive S3 key from module path (strip leading terraform/)
