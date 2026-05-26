@@ -16,7 +16,7 @@ make install    # Installs tf-plan-all and migrate-tfstate to ~/.local/bin
 
 ## Configuration
 
-`migrate-tfstate` loads settings from `k8-util-config.yaml` via the shared k8-lib config chain (see [k8-lib README](../k8-lib/README.md)). Relevant sections:
+`migrate-tfstate` loads settings from `infra-config.yaml` via the shared k8-lib config chain (see [k8-lib README](../k8-lib/README.md)). Relevant sections:
 
 | YAML Path | Env Override | Purpose |
 |-----------|-------------|---------|

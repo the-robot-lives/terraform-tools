@@ -39,6 +39,8 @@ PROFILE="${K8_AWS_PROFILE:-terraformer}"
 KMS_ALIAS="${K8_TF_KMS_ALIAS:-}"
 DYNAMO_TABLE="${K8_TF_LOCK_TABLE:-terraform-lock}"
 
+[[ -z "$BUCKET" ]] && die "K8_TF_STATE_BUCKET is not set. Add terraform.state_bucket to .envrc.k8.dc secrets layer."
+
 DRY_RUN=false
 AUTO_APPROVE=false
 
