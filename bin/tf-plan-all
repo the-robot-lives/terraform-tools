@@ -4,12 +4,16 @@
 # Prints a status table at the end: No Changes | Has Changes | Error | Skipped
 #
 # Usage:
-#   tf-plan-all [dir]       # plan all subdirs of [dir] (default: current directory)
+#   tf-plan-all [--verbose|-v] [dir]
+#
+# Options:
+#   --verbose, -v   Show which folder is being planned, per-plan timing,
+#                   and warn on plans exceeding 5 minutes.
 #
 # Examples:
 #   tf-plan-all
-#   tf-plan-all terraform/production/imported/network
-#   tf-plan-all terraform/production/imported
+#   tf-plan-all --verbose
+#   tf-plan-all -v terraform/production/imported
 
 setopt nounset
 
@@ -20,7 +24,16 @@ if [[ -f "$_K8_ASSIST_LIB" ]]; then
   _k8_check_assist "$0" "$@"
 fi
 
-base_dir="${1:-.}"
+verbose=0
+positional=()
+for arg in "$@"; do
+  case "$arg" in
+    --verbose|-v) verbose=1 ;;
+    *) positional+=("$arg") ;;
+  esac
+done
+
+base_dir="${positional[1]:-.}"
 log_dir="${base_dir}/tf-plan-logs"
 mkdir -p "$log_dir"
 
@@ -51,41 +64,63 @@ for dir in "$base_dir" "$base_dir"/**/*(/N); do
   log_file="$log_dir/${timestamp}-${dir_name}.log"
   mkdir -p "${log_file:h}"
 
-  # Run silently — capture output to log only
-  (
-    cd "$dir" || exit 1
-    terraform plan 2>&1
-  ) > "$log_file"
+  if (( verbose )); then
+    echo "--- planning: $dir_name ..."
+  fi
+
+  plan_start=$SECONDS
+  direnv exec "$dir" terraform -chdir="$dir" plan -input=false > "$log_file" 2>&1
   rc=$?
+  plan_elapsed=$(( SECONDS - plan_start ))
+
+  elapsed_fmt="${plan_elapsed}s"
+  slow_warn=""
+  if (( plan_elapsed >= 300 )); then
+    slow_warn=" [SLOW: $(( plan_elapsed / 60 ))m$(( plan_elapsed % 60 ))s]"
+  fi
 
   if [[ $rc -ne 0 ]]; then
-    echo "==> ❌ ERROR: $dir_name (exit $rc)"
-    results+=("$dir_name|ERROR")
+    echo "==> ❌ ERROR: $dir_name (exit $rc, ${elapsed_fmt})${slow_warn}"
+    results+=("$dir_name|ERROR|$plan_elapsed")
   elif grep -q "No changes\." "$log_file" 2>/dev/null; then
-    echo "==> ✅ NO CHANGES: $dir_name"
-    results+=("$dir_name|NO_CHANGES")
-    # Clean up log — no follow-up needed
+    if (( verbose )); then
+      echo "==> ✅ NO CHANGES: $dir_name (${elapsed_fmt})${slow_warn}"
+    else
+      echo "==> ✅ NO CHANGES: $dir_name"
+    fi
+    results+=("$dir_name|NO_CHANGES|$plan_elapsed")
     rm -f "$log_file"
   else
-    echo "==> ⚠️  HAS CHANGES: $dir_name"
-    results+=("$dir_name|HAS_CHANGES")
-    # Log retained for follow-up
+    echo "==> ⚠️  HAS CHANGES: $dir_name (${elapsed_fmt})${slow_warn}"
+    results+=("$dir_name|HAS_CHANGES|$plan_elapsed")
   fi
 done
 
 # ── Summary table ────────────────────────────────────────────────────────────
 echo
-echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║                   tf-plan-all  SUMMARY                      ║"
-echo "╠══════════════════════════════════════════════════════════════╣"
-printf "║  %-38s  %-16s ║\n" "Directory" "Status"
-echo "╠══════════════════════════════════════════════════════════════╣"
+typeset -a slow_plans
+
+if (( verbose )); then
+  echo "╔═══════════════════════════════════════════════════════════════════════════╗"
+  echo "║                          tf-plan-all  SUMMARY                            ║"
+  echo "╠═══════════════════════════════════════════════════════════════════════════╣"
+  printf "║  %-38s  %-16s  %-8s ║\n" "Directory" "Status" "Time"
+  echo "╠═══════════════════════════════════════════════════════════════════════════╣"
+else
+  echo "╔══════════════════════════════════════════════════════════════╗"
+  echo "║                   tf-plan-all  SUMMARY                      ║"
+  echo "╠══════════════════════════════════════════════════════════════╣"
+  printf "║  %-38s  %-16s ║\n" "Directory" "Status"
+  echo "╠══════════════════════════════════════════════════════════════╣"
+fi
 
 n_clean=0; n_changes=0; n_errors=0; n_skip=0
 
 for entry in "${results[@]}"; do
   name="${entry%%|*}"
-  result_status="${entry##*|}"
+  rest="${entry#*|}"
+  result_status="${rest%%|*}"
+  elapsed="${rest##*|}"
   label="?? Unknown"
   case "$result_status" in
     NO_CHANGES)  label="✅ No Changes";  n_clean=$(( n_clean + 1 ))     ;;
@@ -93,13 +128,42 @@ for entry in "${results[@]}"; do
     ERROR)       label="❌ Error";        n_errors=$(( n_errors + 1 ))   ;;
     SKIP)        label="-- Skipped";     n_skip=$(( n_skip + 1 ))       ;;
   esac
-  printf "║  %-38s  %-16s ║\n" "$name" "$label"
+
+  if (( elapsed >= 300 )); then
+    slow_plans+=("$name ($(( elapsed / 60 ))m$(( elapsed % 60 ))s)")
+  fi
+
+  if (( verbose )); then
+    if (( elapsed >= 60 )); then
+      time_str="$(( elapsed / 60 ))m$(( elapsed % 60 ))s"
+    else
+      time_str="${elapsed}s"
+    fi
+    printf "║  %-38s  %-16s  %-8s ║\n" "$name" "$label" "$time_str"
+  else
+    printf "║  %-38s  %-16s ║\n" "$name" "$label"
+  fi
 done
 
-echo "╠══════════════════════════════════════════════════════════════╣"
-printf "║  ✅ No Changes: %-3d  ⚠️  Has Changes: %-3d  ❌ Errors: %-3d  ║\n" \
-  $n_clean $n_changes $n_errors
-echo "╚══════════════════════════════════════════════════════════════╝"
+if (( verbose )); then
+  echo "╠═══════════════════════════════════════════════════════════════════════════╣"
+  printf "║  ✅ No Changes: %-3d  ⚠️  Has Changes: %-3d  ❌ Errors: %-3d              ║\n" \
+    $n_clean $n_changes $n_errors
+  echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+else
+  echo "╠══════════════════════════════════════════════════════════════╣"
+  printf "║  ✅ No Changes: %-3d  ⚠️  Has Changes: %-3d  ❌ Errors: %-3d  ║\n" \
+    $n_clean $n_changes $n_errors
+  echo "╚══════════════════════════════════════════════════════════════╝"
+fi
+
+if (( ${#slow_plans[@]} > 0 )); then
+  echo
+  echo "⏱  SLOW PLANS (>5 min):"
+  for sp in "${slow_plans[@]}"; do
+    echo "  - $sp"
+  done
+fi
 
 if [[ $n_changes -gt 0 || $n_errors -gt 0 ]]; then
   echo
