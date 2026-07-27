@@ -1,14 +1,16 @@
 #!/bin/zsh
-# tf-plan-all: Run terraform plan in every subdirectory that contains .tf files.
+# tf-plan-all: Run plan across a Terraform or Terragrunt tree.
 # Logs full output for any dir that is NOT "No changes." — skips logging clean dirs.
 # Prints a status table at the end: No Changes | Has Changes | Error | Skipped
 #
 # Usage:
-#   tf-plan-all [--verbose|-v] [dir]
+#   tf-plan-all [--verbose|-v] [--reconfigure] [dir]
 #
 # Options:
 #   --verbose, -v   Show which folder is being planned, per-plan timing,
 #                   and warn on plans exceeding 5 minutes.
+#   --reconfigure   Run init -reconfigure before planning. Useful when cached
+#                   backend config differs from the active endpoint.
 #
 # Examples:
 #   tf-plan-all
@@ -24,11 +26,17 @@ if [[ -f "$_K8_ASSIST_LIB" ]]; then
   _k8_check_assist "$0" "$@"
 fi
 
+# TF_BIN: terraform-compatible binary for plain Terraform trees.
+# Terragrunt trees use Terragrunt's configured terraform_binary/TERRAGRUNT_TFPATH.
+TF_BIN="${TF_BIN:-terraform}"
+
 verbose=0
+reconfigure=0
 positional=()
 for arg in "$@"; do
   case "$arg" in
     --verbose|-v) verbose=1 ;;
+    --reconfigure) reconfigure=1 ;;
     *) positional+=("$arg") ;;
   esac
 done
@@ -38,6 +46,54 @@ log_dir="${base_dir}/tf-plan-logs"
 mkdir -p "$log_dir"
 
 timestamp=$(date +%Y%m%d-%H%M%S)
+
+find_minio_wrapper() {
+  local dir="$1"
+  while [[ -n "$dir" && "$dir" != "/" ]]; do
+    if [[ -x "$dir/scripts/tg-minio.sh" ]]; then
+      echo "$dir/scripts/tg-minio.sh"
+      return 0
+    fi
+    dir="${dir:h}"
+  done
+  return 1
+}
+
+has_terragrunt_config() {
+  local dir="$1"
+  [[ -f "$dir/terragrunt.hcl" || -f "$dir/root.hcl" ]] && return 0
+
+  local -a tg_files
+  tg_files=("$dir"/**/terragrunt.hcl(N))
+  (( ${#tg_files[@]} > 0 ))
+}
+
+if has_terragrunt_config "$base_dir"; then
+  command -v terragrunt >/dev/null 2>&1 || {
+    echo "✗ terragrunt not on PATH" >&2
+    exit 69
+  }
+
+  base_dir="$(cd "$base_dir" && pwd)"
+  wrapper="$(find_minio_wrapper "$base_dir" || true)"
+
+  echo "→ Detected Terragrunt configuration under: $base_dir"
+  if [[ -n "$wrapper" ]]; then
+    echo "→ Using MinIO backend wrapper: $wrapper"
+    if (( reconfigure )); then
+      echo "→ Running: $wrapper $base_dir run --all init -reconfigure"
+      "$wrapper" "$base_dir" run --all init -reconfigure
+    fi
+    exec "$wrapper" "$base_dir" run --all plan -- -input=false
+  fi
+
+  if (( reconfigure )); then
+    echo "→ Running: terragrunt --working-dir $base_dir run --all init -reconfigure"
+    terragrunt --working-dir "$base_dir" run --all init -reconfigure
+  fi
+  echo "→ Running: terragrunt --working-dir $base_dir run --all plan -- -input=false"
+  exec terragrunt --working-dir "$base_dir" run --all plan -- -input=false
+fi
 
 # status arrays: dir_name|status
 typeset -a results
@@ -69,7 +125,17 @@ for dir in "$base_dir" "$base_dir"/**/*(/N); do
   fi
 
   plan_start=$SECONDS
-  direnv exec "$dir" terraform -chdir="$dir" plan -input=false > "$log_file" 2>&1
+  if (( reconfigure )); then
+    direnv exec "$dir" "$TF_BIN" -chdir="$dir" init -reconfigure -input=false > "$log_file" 2>&1
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+      plan_elapsed=$(( SECONDS - plan_start ))
+      echo "==> ❌ ERROR: $dir_name (init exit $rc, ${plan_elapsed}s)"
+      results+=("$dir_name|ERROR|$plan_elapsed")
+      continue
+    fi
+  fi
+  direnv exec "$dir" "$TF_BIN" -chdir="$dir" plan -input=false > "$log_file" 2>&1
   rc=$?
   plan_elapsed=$(( SECONDS - plan_start ))
 
