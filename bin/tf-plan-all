@@ -81,18 +81,18 @@ if has_terragrunt_config "$base_dir"; then
   if [[ -n "$wrapper" ]]; then
     echo "→ Using MinIO backend wrapper: $wrapper"
     if (( reconfigure )); then
-      echo "→ Running: $wrapper $base_dir run --all init -reconfigure"
-      "$wrapper" "$base_dir" run --all init -reconfigure
+      echo "→ Running: $wrapper $base_dir run --all -- init -reconfigure"
+      "$wrapper" "$base_dir" run --all -- init -reconfigure || exit $?
     fi
-    exec "$wrapper" "$base_dir" run --all plan -- -input=false
+    exec "$wrapper" "$base_dir" run --all -- plan -input=false
   fi
 
   if (( reconfigure )); then
-    echo "→ Running: terragrunt --working-dir $base_dir run --all init -reconfigure"
-    terragrunt --working-dir "$base_dir" run --all init -reconfigure
+    echo "→ Running: terragrunt --working-dir $base_dir run --all -- init -reconfigure"
+    terragrunt --working-dir "$base_dir" run --all -- init -reconfigure || exit $?
   fi
-  echo "→ Running: terragrunt --working-dir $base_dir run --all plan -- -input=false"
-  exec terragrunt --working-dir "$base_dir" run --all plan -- -input=false
+  echo "→ Running: terragrunt --working-dir $base_dir run --all -- plan -input=false"
+  exec terragrunt --working-dir "$base_dir" run --all -- plan -input=false
 fi
 
 # status arrays: dir_name|status
