@@ -10,7 +10,7 @@ make install    # Installs tf-plan-all and migrate-tfstate to ~/.local/bin
 
 ## Prerequisites
 
-- `terraform` CLI
+- `terraform` CLI for plain Terraform trees, or `terragrunt` for Terragrunt trees
 - `yq` (for config loading)
 - AWS credentials configured (for S3 state migration)
 
@@ -26,7 +26,19 @@ make install    # Installs tf-plan-all and migrate-tfstate to ~/.local/bin
 | `.aws.profile` | `K8_AWS_PROFILE` | AWS CLI profile (default: `terraformer`) |
 | `.aws.region` | `K8_AWS_REGION` | AWS region (default: `us-east-1`) |
 
-`tf-plan-all` does not require configuration — it runs `terraform plan` across all root modules in a directory tree.
+`tf-plan-all` does not require configuration for plain Terraform trees — it runs
+`terraform plan` across all root modules in a directory tree. Set `TF_BIN=tofu`
+when the tree should use OpenTofu instead of Terraform.
+
+For Terragrunt trees, `tf-plan-all` detects `terragrunt.hcl` / `root.hcl` and
+runs `terragrunt run --all plan -- -input=false` from the requested directory.
+If a repo-local `scripts/tg-minio.sh` wrapper exists, `tf-plan-all` delegates
+through it so MinIO-backed state can be reached through the Kubernetes
+port-forward.
+
+Use `--reconfigure` when cached backend metadata was initialized against a
+different endpoint, such as switching this repo's MinIO backend between
+`https://minio.noizu.com` and `http://127.0.0.1:9000`.
 
 Every tool accepts `--config <path>` to specify an alternative config file.
 
@@ -43,6 +55,8 @@ Every tool accepts `--config <path>` to specify an alternative config file.
 # Batch plan all modules
 tf-plan-all                                     # Plan from current directory
 tf-plan-all terraform/production/imported        # Plan a subtree
+tf-plan-all --reconfigure kubernetes             # Re-init backend cache, then plan
+TF_BIN=tofu tf-plan-all terraform/plain-tofu      # Plain OpenTofu tree
 
 # Migrate local state to S3
 migrate-tfstate terraform/production/services/eks
