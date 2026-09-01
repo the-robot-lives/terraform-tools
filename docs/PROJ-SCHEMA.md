@@ -7,6 +7,10 @@
 > flag grammar, generated Terraform backend config, and remote/local state file
 > layout.
 
+> Layout: see [PROJ-LAYOUT.md](PROJ-LAYOUT.md) — the tools live in `bin/`
+> (`migrate-tfstate`, `tf-plan-all`); all schema sources below are read/written
+> by those two scripts.
+
 ## Config Inputs
 
 ### `infra-config.yaml` (repo root of the *target* tree — external to this package)

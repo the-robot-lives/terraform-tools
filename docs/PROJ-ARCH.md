@@ -45,6 +45,8 @@ graph LR
 | `Makefile` | `install` copies both scripts to `$INSTALL_DIR` (default `~/.local/bin`) with exec permissions; `compile`/`test` are no-ops kept for the shared utilities convention |
 | k8-lib (external) | Shared shell library sourced at runtime: `config.sh` (YAML config chain), `common.sh` (`die` and helpers), `assist.sh` (`--assist` AI help hook) |
 
+→ *Components ↔ directories: see [PROJ-LAYOUT.md](PROJ-LAYOUT.md) — both tools live in `bin/`, installed by the root `Makefile`.*
+
 ## tf-plan-all
 
 Two execution modes, chosen by probing the target tree:

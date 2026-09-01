@@ -23,6 +23,7 @@ terraform-utils/
 │   ├── PROJ-FAQ.md             #   Frequently asked questions
 │   └── PROJ-FAQ.summary.md     #   FAQ summary companion
 ├── merge-notes.md              # Working notes from the utilities-source consolidation
+├── CLAUDE.md                   # Claude Code guidance (utilities fleet rules, monorepo pointers)
 ├── .gitignore                  # Ignores Terraform artifacts (.terraform/, *.tfstate, *.tfplan,
 │                               # .terraform.lock.hcl, override.tf*), editor swap files, .env(.local)
 ├── Makefile                    # `make install` → installs both bin/ tools to $INSTALL_DIR
