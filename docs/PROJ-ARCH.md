@@ -29,6 +29,8 @@ graph LR
     C -->|reads| Y["infra-config.yaml"]
 
     TPA -->|"direnv exec + terraform plan"| TF["Terraform CLI"]
+    TPA -->|"terragrunt trees: run --all plan<br/>(optionally via tg-minio.sh wrapper)"| TG["Terragrunt CLI"]
+    TG --> TF
     MTS -->|"terraform init -migrate-state"| TF
     TF --> S3["S3 backend"]
     TF --> Local["local .tfstate"]
@@ -38,14 +40,17 @@ graph LR
 
 | Component | Purpose |
 |-----------|---------|
-| `bin/tf-plan-all` | Recursively discovers root Terraform modules and runs `terraform plan` in each; emits a Unicode status table (No Changes / Has Changes / Error) and retains logs only for non-clean plans |
+| `bin/tf-plan-all` | Batch planning across a directory tree — auto-detects Terragrunt trees (delegates to `terragrunt run --all plan`, optionally through a `scripts/tg-minio.sh` MinIO wrapper) or walks plain Terraform root modules with `direnv exec`; emits a Unicode status table (No Changes / Has Changes / Error) and retains logs only for non-clean plans |
 | `bin/migrate-tfstate` | Generates an S3 `backend.tf` for a module from k8-lib config and runs `terraform init -migrate-state` to move local state to the remote backend |
 | `Makefile` | `install` copies both scripts to `$INSTALL_DIR` (default `~/.local/bin`) with exec permissions; `compile`/`test` are no-ops kept for the shared utilities convention |
 | k8-lib (external) | Shared shell library sourced at runtime: `config.sh` (YAML config chain), `common.sh` (`die` and helpers), `assist.sh` (`--assist` AI help hook) |
 
 ## tf-plan-all
 
-Walks a directory tree (zsh `**/*(/N)` glob), treats a directory as a root module only if it contains `.tf` files with a `provider` block, and runs `direnv exec <dir> terraform -chdir=<dir> plan -input=false` in each — so per-directory `.envrc` credentials apply. Results are classified by exit code and "No changes." grep; clean-plan logs are deleted, non-clean logs are kept under `<base>/tf-plan-logs/` with a run timestamp. `--verbose` adds per-plan timing and flags plans over 5 minutes as SLOW. Exit status is nonzero if any module errored.
+Two execution modes, chosen by probing the target tree:
+
+- **Terragrunt trees** — if the base dir contains `terragrunt.hcl`, `root.hcl`, or any nested `terragrunt.hcl`, the script switches to Terragrunt: it searches upward from the base dir for an executable `scripts/tg-minio.sh` wrapper (e.g. the monorepo's MinIO port-forward shim) and `exec`s through it if found, otherwise runs `terragrunt --working-dir <base> run --all -- plan -input=false` directly. `--reconfigure` inserts a `run --all -- init -reconfigure` pass first. Terragrunt must be on PATH (exit 69 otherwise). In wrapper/delegation mode the per-module status table is skipped — Terragrunt's own aggregated output stands.
+- **Plain Terraform/OpenTofu trees** — walks the tree (zsh `**/*(/N)` glob), treats a directory as a root module only if it contains `.tf` files with a `provider` block, and runs `direnv exec <dir> $TF_BIN -chdir=<dir> plan -input=false` in each — so per-directory `.envrc` credentials apply. Results are classified by exit code and "No changes." grep; clean-plan logs are deleted, non-clean logs kept under `<base>/tf-plan-logs/` with a run timestamp. `--verbose` adds per-plan timing and flags plans over 5 minutes as SLOW. Exit status is nonzero if any module errored.
 
 ## migrate-tfstate
 
@@ -56,7 +61,7 @@ Sources the full k8-lib chain (`config.sh`/`common.sh`/`assist.sh`), pre-parsing
 - Installed alongside all other Noizu DevOps utilities via the monorepo's `make install-utilities`; depends on k8-lib being installed at `~/.local/share/k8-lib` (overridable via `K8_LIB_DIR`).
 - Follows the repo-wide `.infra-config.yaml`-as-source-of-truth convention through k8-lib's config loader (`yq`-based), with `K8_*` env vars layered on top.
 - `--assist` on either tool routes to k8-lib's AI-powered help.
-- In this monorepo the Terraform binary is typically OpenTofu via Terragrunt, but these tools invoke plain `terraform` — they target ad-hoc/imported module trees rather than the Terragrunt-orchestrated stacks.
+- In this monorepo the Terraform binary is typically OpenTofu via Terragrunt. `tf-plan-all` handles both worlds: it delegates to Terragrunt for `terragrunt.hcl`/`root.hcl` trees (including MinIO-backend wrapper delegation), and runs plain `terraform`/`tofu` (via `TF_BIN`) for ad-hoc/imported module trees. `migrate-tfstate` targets plain-terraform modules only.
 
 ## Key Decisions
 

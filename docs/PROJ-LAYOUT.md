@@ -15,7 +15,14 @@ terraform-utils/
 │   ├── PROJ-ARCH.md            #   Architecture notes
 │   ├── PROJ-ARCH.summary.md    #   Architecture summary companion
 │   ├── PROJ-LAYOUT.md          #   This file
-│   └── PROJ-LAYOUT.summary.md  #   Layout summary companion
+│   ├── PROJ-LAYOUT.summary.md  #   Layout summary companion
+│   ├── PROJ-SCHEMA.md          #   Config/data artifact reference (no DB layer)
+│   ├── PROJ-SCHEMA.summary.md  #   Schema summary companion
+│   ├── PROJ-HOWTO.md           #   Task-oriented how-to recipes
+│   ├── PROJ-HOWTO.summary.md   #   How-to summary companion
+│   ├── PROJ-FAQ.md             #   Frequently asked questions
+│   └── PROJ-FAQ.summary.md     #   FAQ summary companion
+├── merge-notes.md              # Working notes from the utilities-source consolidation
 ├── .gitignore                  # Ignores Terraform artifacts (.terraform/, *.tfstate, *.tfplan,
 │                               # .terraform.lock.hcl, override.tf*), editor swap files, .env(.local)
 ├── Makefile                    # `make install` → installs both bin/ tools to $INSTALL_DIR
