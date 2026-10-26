@@ -1,5 +1,9 @@
 # Changelog — utilities/terraform/terraform-utils
 
+## 2026-10-26
+
+- docs: correct stale "main is CI/CD-only" deploy note — merging into main triggers CI/CD (user-verified 2026-10-26)
+
 ## [Unreleased]
 - No changes since the last milestone.
 
